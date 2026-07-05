@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#F59E0B">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AiSchichtplan">
+  <link rel="manifest" href="manifest.json">
+  <title>AiSchichtplan</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;900&family=DM+Mono:wght@400;500&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:#07070D;font-family:'DM Sans','Segoe UI',sans-serif;overscroll-behavior:none;-webkit-tap-highlight-color:transparent}
+    #root{min-height:100vh;min-height:100dvh}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+    @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .fade{animation:fadeUp .28s ease forwards}
+    select option{background:#1a1a28}
+    input[type=color]{-webkit-appearance:none;border:none;padding:0;cursor:pointer;width:32px;height:32px;border-radius:6px}
+    input[type=color]::-webkit-color-swatch-wrapper{padding:0}
+    input[type=color]::-webkit-color-swatch{border:none;border-radius:5px}
+    input[type=time]{color-scheme:dark}
+    ::-webkit-scrollbar{width:3px}
+    ::-webkit-scrollbar-thumb{background:#222;border-radius:2px}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script>
+const {useState,useRef,useCallback,useMemo,useEffect}=React;
+
+const BASE_SHIFTS={
+  FSA:{label:"Frühschicht A",group:"A",type:"F",color:"#F59E0B",hours:8},
+  SSA:{label:"Spätschicht A",group:"A",type:"S",color:"#FB923C",hours:8},
+  NSA:{label:"Nachtschicht A",group:"A",type:"N",color:"#F97316",hours:8},
+  FSL:{label:"Frühschicht L",group:"L",type:"F",color:"#34D399",hours:8},
+  SSL:{label:"Spätschicht L",group:"L",type:"S",color:"#10B981",hours:8},
+  NSL:{label:"Nachtschicht L",group:"L",type:"N",color:"#059669",hours:8},
+  FSV:{label:"Frühschicht V",group:"V",type:"F",color:"#60A5FA",hours:8},
+  SSV:{label:"Spätschicht V",group:"V",type:"S",color:"#3B82F6",hours:8},
+  NSV:{label:"Nachtschicht V",group:"V",type:"N",color:"#2563EB",hours:8},
+  TSLV:{label:"Tagschicht LV",group:"T",type:"T",color:"#A78BFA",hours:8},
+  TS:{label:"Tagschicht",group:"T",type:"T",color:"#8B5CF6",hours:8},
+  K:{label:"Krank",group:"-",type:"K",color:"#EF4444",hours:0},
+  U:{label:"Urlaub",group:"-",type:"-",color:"#6B7280",hours:0},
+  Frei:{label:"Frei",group:"-",type:"-",color:"#374151",hours:0},
+};
+const DEFAULT_TIMES={FSA:{s:"06:00",e:"14:00"},SSA:{s:"14:00",e:"22:00"},NSA:{s:"22:00",e:"06:00"},FSL:{s:"06:00",e:"14:00"},SSL:{s:"14:00",e:"22:00"},NSL:{s:"22:00",e:"06:00"},FSV:{s:"06:00",e:"14:00"},SSV:{s:"14:00",e:"22:00"},NSV:{s:"22:00",e:"06:00"},TSLV:{s:"07:00",e:"15:00"},TS:{s:"07:00",e:"15:00"}};
+const DEFAULT_ZUL={nacht:{label:"Nachtzuschlag",enabled:true,prozent:25,von:"22:00",bis:"06:00"},spaet:{label:"Spätzuschlag",enabled:true,prozent:15,von:"14:00",bis:"22:00"},samstag:{label:"Samstag",enabled:true,prozent:25},sonntag:{label:"Sonntag",enabled:true,prozent:50},ftWo:{label:"Feiertag (Wochentag)",enabled:true,prozent:175},ftWE:{label:"Feiertag (Wochenende)",enabled:true,prozent:75}};
+const BL=[{code:"NI",name:"Niedersachsen"},{code:"NW",name:"Nordrhein-Westfalen"},{code:"BY",name:"Bayern"},{code:"BW",name:"Baden-Württemberg"},{code:"BE",name:"Berlin"},{code:"BB",name:"Brandenburg"},{code:"HB",name:"Bremen"},{code:"HH",name:"Hamburg"},{code:"HE",name:"Hessen"},{code:"MV",name:"Mecklenburg-Vorpommern"},{code:"RP",name:"Rheinland-Pfalz"},{code:"SL",name:"Saarland"},{code:"SN",name:"Sachsen"},{code:"ST",name:"Sachsen-Anhalt"},{code:"SH",name:"Schleswig-Holstein"},{code:"TH",name:"Thüringen"}];
+const ML=["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+const WD=["Mo","Di","Mi","Do","Fr","Sa","So"];
+const SF={NI:{2026:[{n:"Winterferien",s:"2026-02-02",e:"2026-02-06"},{n:"Osterferien",s:"2026-03-30",e:"2026-04-09"},{n:"Sommerferien",s:"2026-07-16",e:"2026-08-26"},{n:"Herbstferien",s:"2026-10-19",e:"2026-10-30"},{n:"Weihnachtsferien",s:"2026-12-23",e:"2027-01-07"}]},NW:{2026:[{n:"Osterferien",s:"2026-03-30",e:"2026-04-11"},{n:"Sommerferien",s:"2026-06-22",e:"2026-08-04"},{n:"Herbstferien",s:"2026-10-12",e:"2026-10-24"},{n:"Weihnachtsferien",s:"2026-12-23",e:"2027-01-06"}]},BY:{2026:[{n:"Winterferien",s:"2026-02-23",e:"2026-03-07"},{n:"Osterferien",s:"2026-03-27",e:"2026-04-10"},{n:"Sommerferien",s:"2026-07-30",e:"2026-09-11"},{n:"Herbstferien",s:"2026-10-30",e:"2026-11-07"},{n:"Weihnachtsferien",s:"2026-12-21",e:"2027-01-05"}]},BW:{2026:[{n:"Osterferien",s:"2026-03-27",e:"2026-04-11"},{n:"Sommerferien",s:"2026-07-30",e:"2026-09-11"},{n:"Herbstferien",s:"2026-10-26",e:"2026-10-30"},{n:"Weihnachtsferien",s:"2026-12-21",e:"2027-01-08"}]},SH:{2026:[{n:"Winterferien",s:"2026-02-23",e:"2026-03-06"},{n:"Osterferien",s:"2026-04-02",e:"2026-04-17"},{n:"Sommerferien",s:"2026-06-22",e:"2026-08-01"},{n:"Herbstferien",s:"2026-10-05",e:"2026-10-17"},{n:"Weihnachtsferien",s:"2026-12-18",e:"2027-01-05"}]},HH:{2026:[{n:"Frühjahrsferien",s:"2026-03-02",e:"2026-03-13"},{n:"Sommerferien",s:"2026-07-09",e:"2026-08-19"},{n:"Herbstferien",s:"2026-10-12",e:"2026-10-23"},{n:"Weihnachtsferien",s:"2026-12-21",e:"2027-01-01"}]}};
+
+function aD(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r;}
+function fmt(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+function easter(y){const a=y%19,b=Math.floor(y/100),c=y%100,d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451);return new Date(y,Math.floor((h+l-7*m+114)/31)-1,((h+l-7*m+114)%31)+1);}
+function holidays(year,bl){const e=easter(year),h={},a=(d,n)=>{h[fmt(d)]=n;};a(new Date(year,0,1),"Neujahr");a(aD(e,-2),"Karfreitag");a(aD(e,1),"Ostermontag");a(new Date(year,4,1),"Tag der Arbeit");a(aD(e,39),"Christi Himmelfahrt");a(aD(e,50),"Pfingstmontag");a(new Date(year,9,3),"Tag d. Einheit");a(new Date(year,11,25),"1. Weihnachtstag");a(new Date(year,11,26),"2. Weihnachtstag");if(["BW","BY","ST"].includes(bl))a(new Date(year,0,6),"Hl. Drei Könige");if(["BW","BY","HE","NW","RP","SL"].includes(bl))a(aD(e,60),"Fronleichnam");if(["BY","SL"].includes(bl))a(new Date(year,7,15),"Maria Himmelfahrt");if(["BB","HB","HH","MV","NI","SN","ST","SH","TH"].includes(bl))a(new Date(year,9,31),"Reformationstag");if(["BW","BY","NW","RP","SL"].includes(bl))a(new Date(year,10,1),"Allerheiligen");return h;}
+function ferienMap(year,bl){const r={},data=SF[bl];if(!data)return r;[year-1,year,year+1].forEach(y=>{(data[y]||[]).forEach(p=>{let d=new Date(p.s),end=new Date(p.e);while(d<=end){r[fmt(d)]=p.n;d=aD(d,1);}});});return r;}
+function calcPct(code,date,allS,zul,czul,ft){const sh=allS[code];if(!sh||sh.hours===0)return 0;const dk=fmt(date),wd=date.getDay(),isSat=wd===6,isSun=wd===0,isWE=isSat||isSun,isFT=!!ft[dk];let p=0;if(isFT){p=isWE?(zul.ftWE?.prozent||0):(zul.ftWo?.prozent||0);}else if(isSun&&zul.sonntag?.enabled)p=zul.sonntag.prozent||0;else if(isSat&&zul.samstag?.enabled)p=zul.samstag.prozent||0;else{if(sh.type==="N"&&zul.nacht?.enabled)p=zul.nacht.prozent||0;else if(sh.type==="S"&&zul.spaet?.enabled)p=zul.spaet.prozent||0;}(czul||[]).forEach(cz=>{if(!cz.enabled)return;const wn=["So","Mo","Di","Mi","Do","Fr","Sa"][wd];if(!cz.tage||cz.tage.length===0||cz.tage.includes(wn))p=Math.max(p,cz.prozent||0);});return p;}
+function sv(k,v){try{localStorage.setItem("as2_"+k,JSON.stringify(v));}catch(e){}}
+function ld(k,d){try{const v=localStorage.getItem("as2_"+k);return v?JSON.parse(v):d;}catch(e){return d;}}
+
+function App(){
+  const [tab,setTab]=useState("scan");
+  const [stab,setStab]=useState("lohn");
+  const [shifts,setShifts]=useState(()=>ld("shifts",null));
+  const [month,setMonth]=useState(()=>ld("month",new Date().getMonth()));
+  const [year,setYear]=useState(()=>ld("year",new Date().getFullYear()));
+  const [loading,setLoading]=useState(false);
+  const [loadMsg,setLoadMsg]=useState("");
+  const [error,setError]=useState(null);
+  const [priv,setPriv]=useState(false);
+  const [myName,setMyName]=useState(()=>ld("name",""));
+  const [editDay,setEditDay]=useState(null);
+  const [apiKey,setApiKey]=useState(()=>ld("apikey",""));
+  const [showApiSetup,setShowApiSetup]=useState(false);
+  const [tempKey,setTempKey]=useState("");
+  const [tempWorker,setTempWorker]=useState(()=>ld("workerurl",""));
+  const [customShifts,setCS]=useState(()=>ld("cs",{}));
+  const [newSF,setNewSF]=useState({code:"",label:"",color:"#FF6B6B",type:"F"});
+  const [newCZ,setNewCZ]=useState({name:"",prozent:"",tage:[],enabled:true});
+  const [cfg,setCfg]=useState(()=>ld("cfg",{stundenlohn:"",pausenzeit:30,bundesland:"NI"}));
+  const [times,setTimes]=useState(()=>ld("times",DEFAULT_TIMES));
+  const [zul,setZul]=useState(()=>ld("zul",DEFAULT_ZUL));
+  const [czul,setCzul]=useState(()=>ld("czul",[]));
+  const fileRef=useRef();
+
+  useEffect(()=>sv("shifts",shifts),[shifts]);
+  useEffect(()=>sv("month",month),[month]);
+  useEffect(()=>sv("year",year),[year]);
+  useEffect(()=>sv("name",myName),[myName]);
+  useEffect(()=>sv("cfg",cfg),[cfg]);
+  useEffect(()=>sv("times",times),[times]);
+  useEffect(()=>sv("zul",zul),[zul]);
+  useEffect(()=>sv("czul",czul),[czul]);
+  useEffect(()=>sv("cs",customShifts),[customShifts]);
+  useEffect(()=>sv("apikey",apiKey),[apiKey]);
+
+  const allS=useMemo(()=>({...BASE_SHIFTS,...customShifts}),[customShifts]);
+  const ft=useMemo(()=>holidays(year,cfg.bundesland),[year,cfg.bundesland]);
+  const fm=useMemo(()=>ferienMap(year,cfg.bundesland),[year,cfg.bundesland]);
+  const dim=(m,y)=>new Date(y,m+1,0).getDate();
+  const fw=(m,y)=>{const d=new Date(y,m,1).getDay();return d===0?6:d-1;};
+  const sl=parseFloat(cfg.stundenlohn)||0;
+  const ns=8-(cfg.pausenzeit||0)/60;
+
+  const counts=useMemo(()=>!shifts?{}:Object.values(shifts).reduce((a,s)=>{if(s&&s!=="n"&&s!=="Frei")a[s]=(a[s]||0)+1;return a;},{}),[shifts]);
+  const wDays=useMemo(()=>Object.entries(counts).filter(([k])=>(allS[k]?.hours||0)>0).reduce((s,[,v])=>s+v,0),[counts,allS]);
+  const nNight=useMemo(()=>Object.entries(counts).filter(([k])=>allS[k]?.type==="N").reduce((s,[,v])=>s+v,0),[counts,allS]);
+  const nLate=useMemo(()=>Object.entries(counts).filter(([k])=>allS[k]?.type==="S").reduce((s,[,v])=>s+v,0),[counts,allS]);
+
+  const lohn=useMemo(()=>{
+    if(!shifts||!sl)return null;
+    let gl=0,zs=0,det=[];
+    Object.entries(shifts).forEach(([ds,code])=>{
+      const sh=allS[code];if(!sh||sh.hours===0)return;
+      const bp=sl*ns,pct=calcPct(code,new Date(year,month,parseInt(ds)),allS,zul,czul,ft),zu=bp*(pct/100);
+      gl+=bp;zs+=zu;if(pct>0)det.push({day:parseInt(ds),code,pct,zu});
+    });
+    return{gl,zs,tot:gl+zs,det};
+  },[shifts,sl,ns,allS,zul,czul,ft,year,month]);
+
+  const analyze=useCallback(async(b64)=>{
+    if(!myName.trim()){setError("Bitte zuerst Namen eintragen!");return;}
+    if(!apiKey){setShowApiSetup(true);return;}
+    setLoading(true);setLoadMsg("KI analysiert Dienstplan…");setError(null);
+    try{
+      const sys=`Du analysierst Dienstpläne.\nGültige Kürzel: FSA,SSA,NSA,FSL,SSL,NSL,FSV,SSV,NSV,TSLV,TS,K,U,Frei\nExtrahiere NUR die Zeile für "${myName}". Antworte NUR mit JSON:\n{"name":"...","month":1,"year":2026,"shifts":{"1":"FSA","2":"K"}}\nK=Krank! Kürzel GROSS. Leere Felder weglassen.`;
+      const workerUrl=ld("workerurl","");
+      const endpoint = workerUrl || "https://api.anthropic.com/v1/messages";
+      const fetchOpts = workerUrl ? {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({apiKey,model:"claude-sonnet-4-6",max_tokens:2000,system:sys,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:"image/jpeg",data:b64}},{type:"text",text:"Schichten für "+myName+" extrahieren."}]}]})
+      } : {
+        method:"POST",
+        headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01"},
+        body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:2000,system:sys,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:"image/jpeg",data:b64}},{type:"text",text:"Schichten für "+myName+" extrahieren."}]}]})
+      };
+      const res=await fetch(endpoint, fetchOpts);
+      if(!res.ok){const e=await res.json();throw new Error(e.error?.message||"API Fehler "+res.status);}
+      const d=await res.json();
+      const txt=d.content?.map(b=>b.text||"").join("")||"";
+      const p=JSON.parse(txt.replace(/```json|```/g,"").trim());
+      setShifts(p.shifts||{});if(p.month)setMonth(p.month-1);if(p.year)setYear(p.year);
+      setTab("kalender");
+    }catch(e){
+      if(e.message.includes("401")||e.message.includes("invalid")){setError("API-Key ungültig. Bitte in Einstellungen prüfen.");setShowApiSetup(true);}
+      else setError("Fehler: "+e.message);
+    }
+    finally{setLoading(false);}
+  },[myName,apiKey]);
+
+  const handleFile=e=>{
+    const file=e.target.files[0];if(!file)return;
+    if(!myName.trim()){setError("Bitte zuerst Namen eintragen!");return;}
+    const r=new FileReader();r.onload=ev=>analyze(ev.target.result.split(",")[1]);r.readAsDataURL(file);
+    e.target.value="";
+  };
+
+  const days=dim(month,year),fd=fw(month,year);
+  const setZ=(k,f,v)=>setZul(z=>({...z,[k]:{...z[k],[f]:v}}));
+  const setT=(code,f,v)=>setTimes(t=>({...t,[code]:{...t[code],[f]:v}}));
+  const togWd=w=>setNewCZ(c=>({...c,tage:c.tage.includes(w)?c.tage.filter(x=>x!==w):[...c.tage,w]}));
+
+  const IS={background:"#0A0A12",border:"1px solid #2a2a3a",borderRadius:8,padding:"8px 10px",color:"#fff",fontSize:13,outline:"none",width:"100%",fontFamily:"'DM Mono',monospace"};
+  const LS={fontSize:10,color:"#555",marginBottom:4,display:"block"};
+  const C=(s,p,...ch)=>React.createElement(s,p,...ch);
+  const B=(txt,fn,st)=>C("button",{onClick:fn,style:{cursor:"pointer",...st}},txt);
+
+  // API Setup Modal
+  const ApiModal=()=>C("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:800,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
+    C("div",{style:{background:"#111118",border:"1px solid #2a2a3a",borderRadius:20,padding:24,width:"100%",maxWidth:360}},
+      C("div",{style:{fontSize:32,textAlign:"center",marginBottom:12}},"🔑"),
+      C("div",{style:{color:"#fff",fontWeight:900,fontSize:18,textAlign:"center",marginBottom:6}},"API-Key einrichten"),
+      C("div",{style:{color:"#555",fontSize:12,textAlign:"center",marginBottom:20,lineHeight:1.6}},"Einmalig eintragen — wird sicher auf deinem Gerät gespeichert. Niemand anderes kann ihn sehen."),
+      C("div",{style:{background:"#0A0A12",border:"1px solid #1e1e30",borderRadius:12,padding:12,marginBottom:16}},
+        C("div",{style:{fontSize:10,color:"#F59E0B",fontWeight:700,letterSpacing:2,textTransform:"uppercase",marginBottom:8}},"So bekommst du deinen Key:"),
+        C("div",{style:{fontSize:12,color:"#666",lineHeight:1.8}},
+          "1. Gehe auf ",C("span",{style:{color:"#60A5FA"}},"console.anthropic.com"),C("br"),
+          "2. Anmelden / Registrieren",C("br"),
+          "3. Links auf „API Keys" klicken",C("br"),
+          "4. „Create Key" → kopieren"
+        )
+      ),
+      C("label",{style:LS},"Dein API-Key (beginnt mit sk-ant-...)"),
+      C("input",{
+        type:"password",
+        value:tempKey,
+        onChange:e=>setTempKey(e.target.value),
+        placeholder:"sk-ant-api03-...",
+        style:{...IS,marginBottom:12,fontSize:12}
+      }),
+      C("label",{style:{...LS,marginTop:4}},"Cloudflare Worker URL (optional, für GitHub Pages)"),
+      C("input",{
+        type:"text",
+        value:tempWorker,
+        onChange:e=>setTempWorker(e.target.value),
+        placeholder:"https://dein-worker.workers.dev",
+        style:{...IS,marginBottom:12,fontSize:12}
+      }),
+      C("div",{style:{background:"#0A0A12",border:"1px solid #1e1e30",borderRadius:8,padding:10,marginBottom:14}},
+        C("div",{style:{fontSize:10,color:"#555",marginBottom:4}},"💡 Ohne Worker URL funktioniert der Scan nur lokal (nicht auf GitHub Pages)")
+      ),
+      C("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
+        B("Abbrechen",()=>{setShowApiSetup(false);setTempKey("");},{background:"#1a1a22",border:"1px solid #2a2a3a",borderRadius:10,padding:"11px 0",color:"#666",fontWeight:700,fontSize:13,width:"100%"}),
+        B("Speichern",()=>{if(!tempKey.trim())return;setApiKey(tempKey.trim());sv("workerurl",tempWorker.trim());setShowApiSetup(false);setTempKey("");setTempWorker("");},{background:tempKey.trim()?"linear-gradient(135deg,#10B981,#059669)":"#1a1a22",border:"none",borderRadius:10,padding:"11px 0",color:tempKey.trim()?"#fff":"#444",fontWeight:700,fontSize:13,width:"100%"})
+      )
+    )
+  );
+
+  return C("div",{style:{fontFamily:"'DM Sans',sans-serif",background:"#07070D",minHeight:"100vh",display:"flex",justifyContent:"center",padding:"0 0 60px"}},
+
+    showApiSetup&&C(ApiModal,null),
+
+    C("div",{style:{width:"100%",maxWidth:420,padding:"0 16px"}},
+
+      // Header
+      C("div",{style:{padding:"20px 0 12px",display:"flex",alignItems:"center",justifyContent:"space-between"}},
+        C("div",null,
+          C("div",{style:{fontSize:9,letterSpacing:3,color:"#444",fontFamily:"monospace",textTransform:"uppercase"}},"Schichtplan Manager"),
+          C("div",{style:{fontSize:26,fontWeight:900,color:"#fff",letterSpacing:"-1px"}},"Ai",C("span",{style:{color:"#F59E0B"}},"Schichtplan"))
+        ),
+        C("div",{onClick:()=>setPriv(p=>!p),style:{background:priv?"#172B1F":"#111118",border:"1px solid "+(priv?"#10B981":"#1c1c28"),borderRadius:20,padding:"7px 13px",cursor:"pointer",display:"flex",alignItems:"center",gap:6}},
+          C("span",{style:{fontSize:14}},priv?"🔒":"👁"),
+          C("span",{style:{fontSize:11,color:priv?"#10B981":"#555",fontWeight:700}},priv?"PRIVAT":"NORMAL")
+        )
+      ),
+
+      // Name
+      C("div",{style:{background:"#111118",border:"1px solid #1c1c28",borderRadius:12,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:8}},
+        C("span",null,"👤"),
+        C("input",{value:myName,onChange:e=>setMyName(e.target.value),placeholder:"Dein Name im Dienstplan…",style:{background:"transparent",border:"none",outline:"none",color:"#F59E0B",fontWeight:700,fontSize:13,fontFamily:"monospace",flex:1,minWidth:0}})
+      ),
+
+      // API Key Hinweis wenn nicht gesetzt
+      !apiKey&&C("div",{onClick:()=>setShowApiSetup(true),style:{background:"#1A1500",border:"1px solid #F59E0B44",borderRadius:12,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:10,cursor:"pointer"}},
+        C("span",{style:{fontSize:18}},"🔑"),
+        C("div",{style:{flex:1}},
+          C("div",{style:{color:"#F59E0B",fontWeight:700,fontSize:13}},"API-Key fehlt noch"),
+          C("div",{style:{color:"#7a5a20",fontSize:11}},"Tippen zum Einrichten — einmalig nötig")
+        ),
+        C("span",{style:{color:"#F59E0B",fontSize:18}},"›")
+      ),
+
+      // Tabs
+      C("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:3,marginBottom:16}},
+        ...[{k:"scan",i:"📷",l:"Scan"},{k:"kalender",i:"📅",l:"Kalender"},{k:"stats",i:"📊",l:"Statistik"},{k:"einstellungen",i:"⚙️",l:"Settings"}].map(t=>
+          C("button",{key:t.k,onClick:()=>setTab(t.k),style:{background:tab===t.k?"#1A1A28":"transparent",border:"1px solid "+(tab===t.k?"#2a2a40":"#111"),borderRadius:10,padding:"7px 2px",color:tab===t.k?"#fff":"#444",fontSize:11,fontWeight:700,display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer"}},
+            C("span",{style:{fontSize:16}},t.i),t.l
+          )
+        )
+      ),
+
+      // SCAN
+      tab==="scan"&&C("div",{className:"fade"},
+        C("div",{style:{background:"#111118",border:"2px dashed #1e1e30",borderRadius:16,padding:"28px 20px",textAlign:"center",marginBottom:14}},
+          C("div",{style:{fontSize:44,marginBottom:10}},"📋"),
+          C("div",{style:{color:"#fff",fontWeight:800,fontSize:16,marginBottom:4}},"Dienstplan fotografieren"),
+          C("div",{style:{color:"#555",fontSize:12,marginBottom:6}},"Foto aufnehmen oder aus Galerie wählen"),
+          C("div",{style:{color:"#3a3a4a",fontSize:11,marginBottom:20}},"KI erkennt automatisch deinen Namen und deine Schichten"),
+          C("input",{ref:fileRef,type:"file",accept:"image/*",capture:"environment",style:{display:"none"},onChange:handleFile}),
+          B("📸  Foto aufnehmen / hochladen",()=>fileRef.current.click(),{background:"linear-gradient(135deg,#F59E0B,#D97706)",border:"none",borderRadius:12,padding:"14px 0",color:"#000",fontWeight:900,fontSize:15,width:"100%"})
+        ),
+        !apiKey&&C("div",{style:{background:"#111118",border:"1px solid #F59E0B22",borderRadius:12,padding:14,marginBottom:12,textAlign:"center"}},
+          C("div",{style:{color:"#555",fontSize:13,marginBottom:10}},"Erst API-Key einrichten, dann kann gescannt werden"),
+          B("🔑  API-Key einrichten",()=>setShowApiSetup(true),{background:"linear-gradient(135deg,#F59E0B,#D97706)",border:"none",borderRadius:10,padding:"11px 20px",color:"#000",fontWeight:800,fontSize:13})
+        ),
+        C("div",{style:{background:"#111118",border:"1px solid #1c1c28",borderRadius:12,padding:14}},
+          C("div",{style:{fontSize:10,color:"#555",fontWeight:700,letterSpacing:2,textTransform:"uppercase",marginBottom:10}},"ℹ️ So funktioniert es"),
+          C("div",{style:{fontSize:13,color:"#555",lineHeight:2}},
+            "1️⃣  Namen oben eintragen",C("br"),
+            "2️⃣  Dienstplan fotografieren",C("br"),
+            "3️⃣  KI erkennt deine Schichten",C("br"),
+            "4️⃣  Kalender wird automatisch befüllt",C("br"),
+            "5️⃣  Schichten manuell anpassen wenn nötig"
+          )
+        ),
+        error&&C("div",{style:{background:"#1A0808",border:"1px solid #EF4444",borderRadius:10,padding:"12px 14px",color:"#EF4444",fontSize:13,marginTop:12}},
+          C("div",{style:{fontWeight:700,marginBottom:4}},"⚠️ Fehler"),error
+        )
+      ),
+
+      // KALENDER
+      tab==="kalender"&&C("div",{className:"fade"},
+        C("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}},
+          B("‹",()=>{if(month===0){setMonth(11);setYear(y=>y-1);}else setMonth(m=>m-1);},{background:"#111118",border:"1px solid #1c1c28",borderRadius:8,width:34,height:34,color:"#aaa",fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}),
+          C("div",{style:{color:"#fff",fontWeight:900,fontSize:17}},ML[month]+" "+year),
+          B("›",()=>{if(month===11){setMonth(0);setYear(y=>y+1);}else setMonth(m=>m+1);},{background:"#111118",border:"1px solid #1c1c28",borderRadius:8,width:34,height:34,color:"#aaa",fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"})
+        ),
+        C("div",{style:{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"}},
+          C("div",{style:{display:"flex",alignItems:"center",gap:4}},C("div",{style:{width:7,height:7,borderRadius:2,background:"#F59E0B"}}),C("span",{style:{fontSize:10,color:"#555"}},"Feiertag")),
+          C("div",{style:{display:"flex",alignItems:"center",gap:4}},C("div",{style:{width:7,height:7,borderRadius:2,background:"#1a1a40",border:"1px solid #3a3a60"}}),C("span",{style:{fontSize:10,color:"#555"}},"Schulferien")),
+          C("span",{style:{fontSize:10,color:"#444"}},"✏️ Antippen = bearbeiten")
+        ),
+        C("div",{style:{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:4}},
+          ...WD.map((d,i)=>C("div",{key:d,style:{textAlign:"center",fontSize:10,color:i>=5?"#F59E0B55":"#3a3a4a",fontWeight:700,fontFamily:"monospace",padding:"3px 0"}},d))
+        ),
+        C("div",{style:{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:12}},
+          ...Array(fd).fill(null).map((_,i)=>C("div",{key:"e"+i})),
+          ...Array(days).fill(null).map((_,i)=>{
+            const day=i+1,code=shifts?.[String(day)],sh=code&&allS[code],wd=(fd+i)%7,isWE=wd>=5;
+            const dk=year+"-"+String(month+1).padStart(2,"0")+"-"+String(day).padStart(2,"0");
+            const fday=ft[dk],ferien=fm[dk];
+            const pct=code&&sh&&sh.hours>0?calcPct(code,new Date(year,month,day),allS,zul,czul,ft):0;
+            return C("div",{key:day,onClick:()=>setEditDay(day),style:{background:sh?sh.color+"18":ferien?"#12122a":isWE?"#0D0D16":"#111118",border:"1px solid "+(fday?"#F59E0B66":sh?sh.color+"44":ferien?"#2a2a5a":isWE?"#14141E":"#161620"),borderRadius:8,padding:"3px 2px",display:"flex",flexDirection:"column",alignItems:"center",minHeight:48,cursor:"pointer"}},
+              C("div",{style:{fontSize:10,color:fday?"#F59E0B":isWE?"#F59E0B44":"#2e2e3e",fontWeight:fday?700:600,marginBottom:1}},day),
+              fday&&C("div",{style:{fontSize:8}},"🎉"),
+              ferien&&!sh&&!fday&&C("div",{style:{fontSize:6,color:"#4a4a8a",textAlign:"center",lineHeight:1.1}},"Ferien"),
+              sh?C("div",{style:{background:sh.color,borderRadius:4,padding:"2px 1px",fontSize:7,fontWeight:900,color:["N","K"].includes(sh.type)?"#fff":"#000",fontFamily:"monospace",width:"90%",textAlign:"center"}},code)
+                :C("div",{style:{fontSize:8,color:"#252530",marginTop:2}},"＋"),
+              pct>0&&C("div",{style:{fontSize:6,color:"#F59E0B",fontWeight:700,marginTop:1}},"+"+pct+"%")
+            );
+          })
+        ),
+        (()=>{const pfx=year+"-"+String(month+1).padStart(2,"0");const fl=Object.entries(ft).filter(([k])=>k.startsWith(pfx)).sort();return fl.length>0&&C("div",{style:{background:"#111118",border:"1px solid #F59E0B22",borderRadius:12,padding:"10px 14px",marginBottom:10}},C("div",{style:{fontSize:10,color:"#F59E0B",fontWeight:700,letterSpacing:2,textTransform:"uppercase",marginBottom:8}},"🎉 Feiertage"),...fl.map(([k,v])=>C("div",{key:k,style:{display:"flex",justifyContent:"space-between",marginBottom:3}},C("span",{style:{color:"#aaa",fontSize:12}},v),C("span",{style:{color:"#555",fontSize:12,fontFamily:"monospace"}},k.slice(8)+"."))));})(),
+        (()=>{const pfx=year+"-"+String(month+1).padStart(2,"0");const fSet=new Set(Object.entries(fm).filter(([k])=>k.startsWith(pfx)).map(([,v])=>v));return fSet.size>0&&C("div",{style:{background:"#111118",border:"1px solid #2a2a5a",borderRadius:12,padding:"10px 14px",marginBottom:10}},C("div",{style:{fontSize:10,color:"#7a7ab0",fontWeight:700,letterSpacing:2,textTransform:"uppercase",marginBottom:6}},"🏫 Schulferien"),...[...fSet].map(v=>C("div",{key:v,style:{color:"#666",fontSize:12}},v)));})(),
+        shifts&&Object.keys(counts).length>0&&C("div",{style:{display:"flex",flexWrap:"wrap",gap:5,marginBottom:12}},...Object.keys(counts).sort().map(k=>allS[k]&&C("div",{key:k,style:{background:allS[k].color+"18",border:"1px solid "+allS[k].color+"40",borderRadius:6,padding:"2px 8px",display:"flex",alignItems:"center",gap:5}},C("span",{style:{fontSize:10,color:allS[k].color,fontWeight:800,fontFamily:"monospace"}},k),C("span",{style:{fontSize:10,color:"#555"}},counts[k]+"×")))),
+        B("📅  Schichten gespeichert ✓",()=>{},{background:"linear-gradient(135deg,#10B981,#059669)",border:"none",borderRadius:12,padding:"13px 0",color:"#fff",fontWeight:800,fontSize:14,width:"100%"})
+      ),
+
+      // STATISTIK
+      tab==="stats"&&C("div",{className:"fade"},
+        !priv?C("div",{style:{textAlign:"center",padding:"60px 20px"}},
+          C("div",{style:{fontSize:52,marginBottom:16}},"🔒"),
+          C("div",{style:{color:"#fff",fontWeight:900,fontSize:18,marginBottom:8}},"Privat-Modus"),
+          C("div",{style:{color:"#555",fontSize:13,marginBottom:24}},"Statistiken nur im Privat-Modus sichtbar"),
+          B("🔓 Aktivieren",()=>setPriv(true),{background:"linear-gradient(135deg,#10B981,#059669)",border:"none",borderRadius:12,padding:"13px 32px",color:"#fff",fontWeight:800,fontSize:14})
+        ):shifts?C("div",null,
+          C("div",{style:{background:"linear-gradient(135deg,#1A2E22,#0F1F17)",border:"1px solid #10B98133",borderRadius:16,padding:16,marginBottom:12}},
+            C("div",{style:{color:"#10B981",fontSize:10,fontWeight:700,letterSpacing:3,textTransform:"uppercase",marginBottom:10}},"🔒 "+ML[month]+" "+year),
+            C("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,textAlign:"center"}},
+              ...[{l:"Arbeitstage",v:wDays,c:"#fff"},{l:"Nachtschichten",v:nNight,c:"#8B5CF6"},{l:"Spätschichten",v:nLate,c:"#3B82F6"}].map(x=>
+                C("div",{key:x.l,style:{background:"#0A1A12",borderRadius:10,padding:"10px 6px"}},C("div",{style:{color:x.c,fontSize:26,fontWeight:900,lineHeight:1}},x.v),C("div",{style:{color:"#3a5a4a",fontSize:10,marginTop:4}},x.l))
+              )
+            )
+          ),
+          C("div",{style:{display:"flex",flexDirection:"column",gap:6,marginBottom:12}},
+            ...Object.entries(counts).sort(([a],[b])=>a.localeCompare(b)).map(([code,cnt])=>{
+              const sh=allS[code];if(!sh)return null;
+              return C("div",{key:code,style:{background:"#111118",border:"1px solid "+sh.color+"22",borderRadius:12,padding:"12px 14px",display:"flex",alignItems:"center",gap:12}},
+                C("div",{style:{width:44,height:44,borderRadius:10,background:sh.color+"20",border:"1px solid "+sh.color+"55",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}},C("span",{style:{fontSize:10,fontWeight:900,color:sh.color,fontFamily:"monospace"}},code)),
+                C("div",{style:{flex:1}},C("div",{style:{color:"#fff",fontWeight:700,fontSize:14}},sh.label),C("div",{style:{color:"#555",fontSize:11}},sh.type==="K"?"Krank":sh.type==="F"?"Frühschicht":sh.type==="S"?"Spätschicht":sh.type==="N"?"Nachtschicht":"Tagschicht")),
+                C("div",{style:{color:"#fff",fontSize:26,fontWeight:900,flexShrink:0}},cnt,C("span",{style:{fontSize:13,color:"#555"}},"×"))
+              );
+            })
+          ),
+          C("div",{style:{background:"#111118",border:"1px solid #1c1c28",borderRadius:14,padding:14}},
+            C("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:12}},C("span",null,"💰"),C("div",{style:{color:"#fff",fontWeight:800,fontSize:14}},"Lohnberechnung"),!sl&&C("div",{style:{background:"#1A1500",border:"1px solid #F59E0B55",borderRadius:20,padding:"2px 9px",fontSize:9,color:"#F59E0B",fontWeight:700,marginLeft:"auto"}},"⚠ Stundenlohn fehlt")),
+            lohn?C("div",null,
+              C("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8}},
+                ...[{l:"Stundenlohn",v:sl.toFixed(2)+" €"},{l:"Nettostd./Schicht",v:ns.toFixed(1)+" h"},{l:"Grundlohn ges.",v:lohn.gl.toFixed(2)+" €"},{l:"Zulagen ges.",v:"+"+lohn.zs.toFixed(2)+" €"}].map(r=>
+                  C("div",{key:r.l,style:{background:"#0A0A12",borderRadius:9,padding:"10px 11px"}},C("div",{style:{color:"#3a3a4a",fontSize:10,marginBottom:3}},r.l),C("div",{style:{color:"#ccc",fontWeight:800,fontSize:16}},r.v))
+                )
+              ),
+              C("div",{style:{background:"linear-gradient(135deg,#2A1F07,#1A1207)",border:"1px solid #F59E0B44",borderRadius:10,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:lohn.det.length>0?8:0}},
+                C("span",{style:{color:"#7a5a20",fontSize:13}},"Brutto gesamt (geschätzt)"),
+                C("span",{style:{color:"#F59E0B",fontSize:22,fontWeight:900}},lohn.tot.toFixed(2)+" €")
+              ),
+              lohn.det.length>0&&C("div",{style:{background:"#0A0A12",borderRadius:10,padding:10}},
+                C("div",{style:{fontSize:10,color:"#444",fontWeight:700,letterSpacing:2,textTransform:"uppercase",marginBottom:8}},"Zuschlag-Details"),
+                ...lohn.det.slice(0,6).map(d=>C("div",{key:d.day,style:{display:"flex",justifyContent:"space-between",marginBottom:4}},
+                  C("span",{style:{color:"#888",fontSize:12}},d.day+". – "+d.code+" ",C("span",{style:{color:"#F59E0B"}},"+"+d.pct+"%")),
+                  C("span",{style:{color:"#F59E0B",fontSize:12,fontFamily:"monospace"}},"+"+d.zu.toFixed(2)+" €")
+                )),
+                lohn.det.length>6&&C("div",{style:{color:"#444",fontSize:11,textAlign:"center"}},"+"+( lohn.det.length-6)+" weitere")
+              )
+            ):C("div",{style:{color:"#333",fontSize:11,textAlign:"center"}},"Stundenlohn in Einstellungen eintragen ⚙️")
+          )
+        ):C("div",{style:{textAlign:"center",padding:"60px 20px"}},C("div",{style:{fontSize:40,marginBottom:12}},"📊"),C("div",{style:{color:"#555",marginBottom:16}},"Erst Plan scannen"),B("→ Zum Scanner",()=>setTab("scan"),{background:"none",border:"none",color:"#F59E0B",fontSize:14,fontWeight:700}))
+      ),
+
+      // EINSTELLUNGEN
+      tab==="einstellungen"&&C("div",{className:"fade"},
+        // API Key Status
+        C("div",{style:{background:apiKey?"#172B1F":"#1A1500",border:"1px solid "+(apiKey?"#10B98144":"#F59E0B44"),borderRadius:12,padding:"12px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:10}},
+          C("span",{style:{fontSize:18}},apiKey?"✅":"🔑"),
+          C("div",{style:{flex:1}},
+            C("div",{style:{color:apiKey?"#10B981":"#F59E0B",fontWeight:700,fontSize:13}},apiKey?"API-Key aktiv":"API-Key fehlt"),
+            C("div",{style:{color:apiKey?"#3a5a4a":"#7a5a20",fontSize:11}},apiKey?"Scan-Funktion verfügbar":"Einrichten um Pläne zu scannen")
+          ),
+          B(apiKey?"Ändern":"Einrichten",()=>setShowApiSetup(true),{background:apiKey?"#1a1a22":"#F59E0B",border:apiKey?"1px solid #2a2a3a":"none",borderRadius:8,padding:"7px 12px",color:apiKey?"#666":"#000",fontWeight:700,fontSize:11})
+        ),
+
+        C("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:3,marginBottom:14}},
+          ...[{k:"lohn",l:"💶 Lohn"},{k:"zeiten",l:"⏰ Zeiten"},{k:"zulagen",l:"📈 Zulagen"},{k:"kuerzel",l:"⚡ Kürzel"}].map(t=>
+            C("button",{key:t.k,onClick:()=>setStab(t.k),style:{background:stab===t.k?"#1e1e30":"#111118",border:"1px solid "+(stab===t.k?"#3a3a60":"#1c1c28"),borderRadius:9,padding:"8px 4px",color:stab===t.k?"#fff":"#555",fontSize:10,fontWeight:700,cursor:"pointer"}},t.l)
+          )
+        ),
+
+        stab==="lohn"&&C("div",{style:{background:"#111118",border:"1px solid #1c1c28",borderRadius:14,padding:14,marginBottom:12}},
+          C("div",{style:{fontSize:10,color:"#555",fontWeight:700,letterSpacing:2,textTransform:"uppercase",marginBottom:14}},"💶 Lohn & Allgemein"),
+          C("div",{style:{marginBottom:12}},C("label",{style:LS},"Stundenlohn (€ / Stunde)"),C("div",{style:{background:"#0A0A12",border:"1px solid #2a2a3a",borderRadius:10,padding:"10px 14px",display:"flex",alignItems:"center",gap:8}},C("span",null,"💶"),C("input",{type:"number",value:cfg.stundenlohn,onChange:e=>setCfg(s=>({...s,stundenlohn:e.target.value})),placeholder:"z.B. 16.50",min:"0",step:"0.01",style:{background:"transparent",border:"none",outline:"none",color:"#fff",fontWeight:700,fontSize:18,flex:1,fontFamily:"monospace"}}),C("span",{style:{color:"#555",fontSize:13}},"€/h"))),
+          C("div",{style:{marginBottom:12}},C("label",{style:LS},"Pausenzeit pro Schicht"),C("div",{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}},...[15,30,45,60].map(m=>B(m+" min",()=>setCfg(s=>({...s,pausenzeit:m})),{background:cfg.pausenzeit===m?"#F59E0B":"#0A0A12",border:"1px solid "+(cfg.pausenzeit===m?"#F59E0B":"#2a2a3a"),borderRadius:8,padding:"10px 4px",color:cfg.pausenzeit===m?"#000":"#888",fontWeight:700,fontSize:13})))),
+          C("div",null,C("label",{style:LS},"Bundesland"),C("div",{style:{background:"#0A0A12",border:"1px solid #2a2a3a",borderRadius:10,padding:"4px 14px",display:"flex",alignItems:"center",gap:8}},C("span",null,"📍"),C("select",{value:cfg.bundesland,onChange:e=>setCfg(s=>({...s,bundesland:e.target.value})),style:{background:"transparent",border:"none",outline:"none",color:"#fff",fontWeight:600,fontSize:14,flex:1,padding:"10px 0",cursor:"pointer"}},...BL.map(bl=>C("option",{key:bl.code,value:bl.code},bl.code+" – "+bl.name)))))
+        ),
+
+        stab==="zeiten"&&C("div",{style:{background:"#111118",border:"1px solid #1c1c28",borderRadius:14,padding:14,marginBottom:12}},
+          C("div",{style:{fontSize:10,color:"#555",fontWeight:700,letterSpacing:2,textTransform:"uppercase",marginBottom:14}},"⏰ Schichtzeiten"),
+          ...Object.entries(times).map(([code,t])=>{const sh=BASE_SHIFTS[code];if(!sh)return null;return C("div",{key:code,style:{background:"#0A0A12",border:"1px solid "+sh.color+"22",borderRadius:12,padding:"12px 14px",marginBottom:8}},C("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:10}},C("div",{style:{width:36,height:36,borderRadius:8,background:sh.color+"22",border:"1px solid "+sh.color+"55",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}},C("span",{style:{fontSize:9,fontWeight:900,color:sh.color,fontFamily:"monospace"}},code)),C("div",{style:{color:"#fff",fontWeight:600,fontSize:13}},sh.label)),C("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},C("div",null,C("label",{style:LS},"Beginn"),C("input",{type:"time",value:t.s,onChange:e=>setT(code,"s",e.target.value),style:{...IS,color:"#10B981",fontWeight:700}})),C("div",null,C("label",{style:LS},"Ende"),C("input",{type:"time",value:t.e,onChange:e=>setT(code,"e",e.target.value),style:{...IS,color:"#EF4444",fontWeight:700}}))));})
+        ),
+
+        stab==="zulagen"&&C("div",null,
+          C("div",{style:{background:"#111118",border:"1px solid #1c1c28",borderRadius:14,padding:14,marginBottom:12}},
+            C("div",{style:{fontSize:10,color:"#555",fontWeight:700,letterSpacing:2,textTransform:"uppercase",marginBottom:14}},"📈 Zuschläge & Zulagen"),
+            ...Object.entries(zul).map(([key,z])=>C("div",{key,style:{background:"#0A0A12",border:"1px solid #2a2a3a",borderRadius:12,padding:"12px 14px",marginBottom:8}},
+              C("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:z.enabled?10:0}},
+                C("div",{style:{color:"#fff",fontWeight:600,fontSize:13}},z.label),
+                C("button",{onClick:()=>setZ(key,"enabled",!z.enabled),style:{width:40,height:22,borderRadius:11,border:"none",cursor:"pointer",position:"relative",background:z.enabled?"#10B981":"#2a2a3a",flexShrink:0}},
+                  C("span",{style:{position:"absolute",top:3,left:z.enabled?21:3,width:16,height:16,borderRadius:8,background:"#fff",transition:"left .2s",display:"block"}})
+                )
+              ),
+              z.enabled&&C("div",{style:{display:"grid",gridTemplateColumns:(key==="nacht"||key==="spaet")?"1fr 1fr 1fr":"1fr",gap:8}},
+                C("div",null,C("label",{style:LS},"Zuschlag %"),C("input",{type:"number",value:z.prozent,onChange:e=>setZ(key,"prozent",parseFloat(e.target.value)||0),min:"0",max:"300",step:"5",style:{...IS,color:"#F59E0B",fontWeight:800,fontSize:16}})),
+                (key==="nacht"||key==="spaet")&&C("div",null,C("label",{style:LS},"Von"),C("input",{type:"time",value:z.von||"",onChange:e=>setZ(key,"von",e.target.value),style:IS})),
+                (key==="nacht"||key==="spaet")&&C("div",null,C("label",{style:LS},"Bis"),C("input",{type:"time",value:z.bis||"",onChange:e=>setZ(key,"bis",e.target.value),style:IS}))
+              )
+            )),
+            czul.length>0&&C("div",{style:{marginTop:8}},
+              C("div",{style:{fontSize:10,color:"#555",fontWeight:700,letterSpacing:2,textTransform:"uppercase",marginBottom:8}},"Eigene Zulagen"),
+              ...czul.map((cz,idx)=>C("div",{key:idx,style:{background:"#0A0A12",border:"1px solid #2a2a3a",borderRadius:12,padding:"12px 14px",marginBottom:6,display:"flex",alignItems:"center",gap:10}},
+                C("div",{style:{flex:1}},C("div",{style:{color:"#fff",fontWeight:600,fontSize:13}},cz.name),C("div",{style:{color:"#F59E0B",fontSize:12}},"+"+cz.prozent+"% "+(cz.tage&&cz.tage.length>0?"· "+cz.tage.join(", "):"alle Tage"))),
+                B("✕",()=>setCzul(l=>l.filter((_,i)=>i!==idx)),{background:"#1A0808",border:"1px solid #991B1B",borderRadius:6,padding:"5px 10px",color:"#EF4444",fontSize:11})
+              ))
+            ),
+            C("div",{style:{background:"#0A0A12",border:"1px dashed #2a2a3a",borderRadius:12,padding:12,marginTop:10}},
+              C("div",{style:{fontSize:11,color:"#555",fontWeight:600,marginBottom:10}},"+ Eigene Zulage hinzufügen"),
+              C("div",{style:{display:"grid",gridTemplateColumns:"2fr 1fr",gap:8,marginBottom:8}},
+                C("div",null,C("label",{style:LS},"Bezeichnung"),C("input",{value:newCZ.name,onChange:e=>setNewCZ(c=>({...c,name:e.target.value})),placeholder:"z.B. Bereitschaft",style:IS})),
+                C("div",null,C("label",{style:LS},"Zuschlag %"),C("input",{type:"number",value:newCZ.prozent,onChange:e=>setNewCZ(c=>({...c,prozent:e.target.value})),placeholder:"30",min:"0",max:"300",style:{...IS,color:"#F59E0B",fontWeight:800}}))
+              ),
+              C("div",{style:{marginBottom:10}},
+                C("label",{style:LS},"Gilt für Tage (leer = alle)"),
+                C("div",{style:{display:"flex",gap:5,flexWrap:"wrap"}},
+                  ...["Mo","Di","Mi","Do","Fr","Sa","So"].map(wd=>B(wd,()=>togWd(wd),{background:newCZ.tage.includes(wd)?"#3B82F6":"#111118",border:"1px solid "+(newCZ.tage.includes(wd)?"#3B82F6":"#2a2a3a"),borderRadius:6,padding:"5px 8px",color:newCZ.tage.includes(wd)?"#fff":"#666",fontSize:11,fontWeight:700}))
+                )
+              ),
+              B("+ Zulage hinzufügen",()=>{if(!newCZ.name||!newCZ.prozent)return;setCzul(l=>[...l,{...newCZ,prozent:parseFloat(newCZ.prozent)||0,enabled:true}]);setNewCZ({name:"",prozent:"",tage:[],enabled:true});},{background:newCZ.name&&newCZ.prozent?"linear-gradient(135deg,#3B82F6,#1D4ED8)":"#111118",border:"none",borderRadius:10,padding:"11px 0",color:newCZ.name&&newCZ.prozent?"#fff":"#444",fontWeight:700,fontSize:13,width:"100%"})
+            )
+          )
+        ),
+
+        stab==="kuerzel"&&C("div",{style:{background:"#111118",border:"1px solid #1c1c28",borderRadius:14,padding:14,marginBottom:12}},
+          C("div",{style:{fontSize:10,color:"#555",fontWeight:700,letterSpacing:2,textTransform:"uppercase",marginBottom:14}},"⚡ Eigene Schichtkürzel"),
+          Object.keys(customShifts).length>0&&C("div",{style:{marginBottom:12}},
+            ...Object.entries(customShifts).map(([code,sh])=>C("div",{key:code,style:{background:"#0A0A12",border:"1px solid "+sh.color+"33",borderRadius:10,padding:"10px 12px",display:"flex",alignItems:"center",gap:10,marginBottom:6}},
+              C("div",{style:{width:34,height:34,borderRadius:8,background:sh.color+"22",border:"1px solid "+sh.color,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}},C("span",{style:{fontSize:9,fontWeight:900,color:sh.color,fontFamily:"monospace"}},code)),
+              C("div",{style:{flex:1}},C("div",{style:{color:"#fff",fontSize:13,fontWeight:600}},sh.label),C("div",{style:{color:"#555",fontSize:11}},"Typ: "+sh.type)),
+              B("✕",()=>setCS(cs=>{const n={...cs};delete n[code];return n;}),{background:"#1A0808",border:"1px solid #991B1B",borderRadius:6,padding:"5px 10px",color:"#EF4444",fontSize:11})
+            ))
+          ),
+          C("div",{style:{background:"#0A0A12",border:"1px dashed #2a2a3a",borderRadius:12,padding:12}},
+            C("div",{style:{fontSize:11,color:"#444",marginBottom:10,fontWeight:600}},"Neues Kürzel"),
+            C("div",{style:{display:"grid",gridTemplateColumns:"1fr 2fr",gap:8,marginBottom:8}},
+              C("div",null,C("label",{style:LS},"Kürzel (max. 5)"),C("input",{value:newSF.code,onChange:e=>setNewSF(f=>({...f,code:e.target.value.toUpperCase().slice(0,5)})),placeholder:"TZ",style:{...IS,color:"#F59E0B",fontWeight:800,fontSize:14}})),
+              C("div",null,C("label",{style:LS},"Bezeichnung"),C("input",{value:newSF.label,onChange:e=>setNewSF(f=>({...f,label:e.target.value})),placeholder:"z.B. Tagschicht Z",style:IS}))
+            ),
+            C("div",{style:{display:"grid",gridTemplateColumns:"auto 1fr",gap:8,marginBottom:12,alignItems:"end"}},
+              C("div",null,C("label",{style:LS},"Farbe"),C("div",{style:{background:"#111118",border:"1px solid #2a2a3a",borderRadius:8,padding:"8px 10px"}},C("input",{type:"color",value:newSF.color,onChange:e=>setNewSF(f=>({...f,color:e.target.value}))}))),
+              C("div",null,C("label",{style:LS},"Schichttyp"),C("select",{value:newSF.type,onChange:e=>setNewSF(f=>({...f,type:e.target.value})),style:{...IS,cursor:"pointer",padding:"9px 10px"}},
+                C("option",{value:"F"},"F – Frühschicht"),C("option",{value:"S"},"S – Spätschicht"),C("option",{value:"N"},"N – Nachtschicht"),C("option",{value:"T"},"T – Tagschicht")
+              ))
+            ),
+            B("+ Kürzel hinzufügen",()=>{if(!newSF.code||!newSF.label)return;setCS(cs=>({...cs,[newSF.code]:{label:newSF.label,color:newSF.color,type:newSF.type,hours:8,group:"C"}}));setNewSF({code:"",label:"",color:"#FF6B6B",type:"F"});},{background:newSF.code&&newSF.label?"linear-gradient(135deg,#10B981,#059669)":"#1a1a22",border:"none",borderRadius:10,padding:"11px 0",color:newSF.code&&newSF.label?"#fff":"#444",fontWeight:700,fontSize:14,width:"100%"})
+          )
+        )
+      ),
+
+      // Loading
+      loading&&C("div",{style:{position:"fixed",inset:0,background:"rgba(7,7,13,.95)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",zIndex:900}},
+        C("div",{style:{width:64,height:64,borderRadius:18,background:"#111118",border:"2px solid #F59E0B44",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:20,fontSize:30}},"🔍"),
+        C("div",{style:{color:"#fff",fontWeight:800,fontSize:17,marginBottom:6}},loadMsg),
+        C("div",{style:{color:"#555",fontSize:12,marginBottom:16}},"Internetverbindung erforderlich"),
+        C("div",{style:{display:"flex",gap:8}},...[0,1,2].map(i=>C("div",{key:i,style:{width:7,height:7,borderRadius:"50%",background:"#F59E0B",animation:"blink 1.2s ease-in-out infinite",animationDelay:i*0.2+"s"}})))
+      ),
+
+      // Edit Modal
+      editDay!==null&&C("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",zIndex:500,display:"flex",alignItems:"flex-end"},onClick:()=>setEditDay(null)},
+        C("div",{style:{width:"100%",background:"#0D0D16",borderRadius:"20px 20px 0 0",padding:20,maxHeight:"80vh",overflowY:"auto",animation:"slideUp .3s cubic-bezier(.2,.8,.2,1) forwards"},onClick:e=>e.stopPropagation()},
+          C("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}},
+            C("div",null,C("div",{style:{color:"#555",fontSize:11,textTransform:"uppercase",letterSpacing:2}},"Schicht bearbeiten"),C("div",{style:{color:"#fff",fontWeight:900,fontSize:20}},editDay+". "+ML[month]+" "+year)),
+            B("✕",()=>setEditDay(null),{background:"#1a1a28",border:"1px solid #2a2a3a",borderRadius:10,width:36,height:36,color:"#aaa",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center"})
+          ),
+          C("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}},
+            ...Object.entries(allS).filter(([k])=>k!=="n").map(([code,sh])=>{
+              const isAct=shifts?.[String(editDay)]===code;
+              return C("button",{key:code,onClick:()=>{setShifts(s=>({...s,[String(editDay)]:code}));setEditDay(null);},style:{background:isAct?sh.color:sh.color+"18",border:"1px solid "+(isAct?sh.color:sh.color+"55"),borderRadius:12,padding:"12px 6px",display:"flex",flexDirection:"column",alignItems:"center",gap:4,cursor:"pointer"}},
+                C("span",{style:{fontSize:14,fontWeight:900,color:isAct?(["N","K"].includes(sh.type)?"#fff":"#000"):sh.color,fontFamily:"monospace"}},code),
+                C("span",{style:{fontSize:9,color:isAct?(["N","K"].includes(sh.type)?"#fff9":"#0009"):sh.color+"aa",textAlign:"center",lineHeight:1.2}},sh.label)
+              );
+            })
+          ),
+          B("🗑  Eintrag löschen",()=>{setShifts(s=>{const n={...s};delete n[String(editDay)];return n;});setEditDay(null);},{background:"#1A0808",border:"1px solid #991B1B55",borderRadius:12,padding:"12px 0",color:"#EF4444",fontWeight:700,fontSize:14,width:"100%"})
+        )
+      ),
+
+      C("div",{style:{textAlign:"center",marginTop:24,color:"#1a1a22",fontSize:9,fontFamily:"monospace",letterSpacing:2}},"AISCHICHTPLAN · v2.0")
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+</script>
+<script>
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('./sw.js').catch(()=>{});
+  }
+</script>
+</body>
+</html>
